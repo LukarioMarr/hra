@@ -1,0 +1,1 @@
+Tato hra je supr
