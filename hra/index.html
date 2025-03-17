@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Labyrint Duchů</title>
+    <style>
+        body { 
+            text-align: center; 
+            font-family: Arial, sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+            background-color: #333; 
+            color: white; 
+            background-image: url('menu_background.png'); /* Pozadí menu */
+            background-size: cover; 
+            background-position: center; 
+        }
+        .menu-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7); /* Poloprůhledné pozadí pro menu */
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .menu-text {
+            text-align: left;
+            margin-right: 40px;
+            max-width: 400px;
+        }
+        .menu-text h1 {
+            margin-top: 0;
+        }
+        .menu-text p {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        canvas { 
+            background: black; 
+            border: 2px solid white; 
+            display: none; 
+        }
+        button { 
+            margin: 10px; 
+            padding: 10px 20px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            background-color: #444; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+        }
+        button:hover {
+            background-color: #555;
+        }
+        .score { 
+            margin-top: 20px; 
+            font-size: 20px; 
+        }
+        .game-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+        .timer {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="menu-container">
+        <div class="menu-text">
+            <h1>Labyrint Duchů</h1>
+            <p>
+                Vítej ve hře Labyrint Duchů! Tvým úkolem je pomoc rytířovi projít bludištěm a dostat se k cílové bráně, aniž by tě chytil duch.
+            </p>
+            <p>
+                Použij šipky na klávesnici pro pohyb: nahoru, dolů, doleva a doprava. Duch se pohybuje náhodně a snaží se vás chytit.
+            </p>
+            <p>
+                Pokud se dostaneš do cíle, vyhráváš! Pokud tě duch chytí, prohráváš. Hra se opakuje a body získává buď duch nebo ty!
+            </p>
+        </div>
+        <div>
+            <button onclick="startGame()">Začít hru</button>
+            <button onclick="stopGame()">Konec</button>
+        </div>
+    </div>
+    <canvas id="gameCanvas" width="600" height="600"></canvas>
+    <div class="game-controls">
+        <button onclick="stopGame()">Konec</button>
+    </div>
+    <div class="timer" id="timer">00:00</div>
+    <div class="score">
+        <p>Hráč: <span id="playerScore">0</span></p>
+        <p>Duch: <span id="ghostScore">0</span></p>
+    </div>
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const playerScoreElement = document.getElementById("playerScore");
+        const ghostScoreElement = document.getElementById("ghostScore");
+        const timerElement = document.getElementById("timer");
+        
+        const tileSize = 30;
+        const player = { x: 1, y: 1, image: new Image() };
+        const ghost = { x: 8, y: 8, image: new Image(), lastDirection: null };
+        const exit = { x: 18, y: 18, image: new Image() };
+        let gameInterval;
+        let timerInterval;
+        let playerScore = 0;
+        let ghostScore = 0;
+        let startTime;
+
+        player.image.src = "player.png"; 
+        ghost.image.src = "ghost.png"; 
+        exit.image.src = "exit.png";
+
+        // Textura pozadí pro volné prostory
+        const backgroundTexture = new Image();
+        backgroundTexture.src = "texture.png";
+
+        // Textura pro stěny
+        const wallTexture = new Image();
+        wallTexture.src = "wall_texture.png";
+
+        function generateMaze(width, height) {
+            let maze = Array.from({ length: height }, () => Array(width).fill(1));
+            function carve(x, y) {
+                maze[y][x] = 0;
+                let directions = [ [0, -1], [0, 1], [-1, 0], [1, 0] ].sort(() => Math.random() - 0.5);
+                for (let [dx, dy] of directions) {
+                    let nx = x + dx * 2, ny = y + dy * 2;
+                    if (ny > 0 && ny < height && nx > 0 && nx < width && maze[ny][nx] === 1) {
+                        maze[y + dy][x + dx] = 0;
+                        carve(nx, ny);
+                    }
+                }
+            }
+            carve(1, 1);
+            return maze;
+        }
+
+        let maze = generateMaze(20, 20);
+
+        function drawMaze() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < maze.length; y++) {
+                for (let x = 0; x < maze[y].length; x++) {
+                    if (maze[y][x] === 1) {
+                        ctx.drawImage(wallTexture, x * tileSize, y * tileSize, tileSize, tileSize);
+                    } else {
+                        ctx.drawImage(backgroundTexture, x * tileSize, y * tileSize, tileSize, tileSize);
+                    }
+                }
+            }
+            ctx.drawImage(player.image, player.x * tileSize, player.y * tileSize, tileSize, tileSize);
+            ctx.drawImage(ghost.image, ghost.x * tileSize, ghost.y * tileSize, tileSize, tileSize);
+            ctx.drawImage(exit.image, exit.x * tileSize, exit.y * tileSize, tileSize, tileSize);
+        }
+
+        function movePlayer(dx, dy) {
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            if (maze[newY][newX] === 0) {
+                player.x = newX;
+                player.y = newY;
+                checkWin();
+                checkLoss();
+            }
+            drawMaze();
+        }
+
+        function moveGhost() {
+            const directions = [
+                { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+                { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
+            ];
+
+            if (ghost.lastDirection) {
+                const newX = ghost.x + ghost.lastDirection.dx;
+                const newY = ghost.y + ghost.lastDirection.dy;
+                if (maze[newY][newX] === 0) {
+                    ghost.x = newX;
+                    ghost.y = newY;
+                    checkLoss();
+                    return;
+                }
+            }
+
+            const validDirections = directions.filter(({ dx, dy }) => {
+                const newX = ghost.x + dx;
+                const newY = ghost.y + dy;
+                return maze[newY][newX] === 0;
+            });
+
+            if (validDirections.length > 0) {
+                const randomMove = validDirections[Math.floor(Math.random() * validDirections.length)];
+                ghost.x += randomMove.dx;
+                ghost.y += randomMove.dy;
+                ghost.lastDirection = randomMove;
+                checkLoss();
+            }
+        }
+
+        function checkWin() {
+            if (player.x === exit.x && player.y === exit.y) {
+                alert(`Vyhrál jsi! 🎉 Tvůj čas: ${timerElement.textContent}`);
+                playerScore++;
+                playerScoreElement.textContent = playerScore;
+                stopGame();
+            }
+        }
+
+        function checkLoss() {
+            if (player.x === ghost.x && player.y === ghost.y) {
+                alert(`Chytil tě duch! 💀 Tvůj čas: ${timerElement.textContent}`);
+                ghostScore++;
+                ghostScoreElement.textContent = ghostScore;
+                stopGame();
+            }
+        }
+
+        function placeExit() {
+            let validPositions = [];
+            for (let y = 0; y < maze.length; y++) {
+                for (let x = 0; x < maze[y].length; x++) {
+                    if (maze[y][x] === 0) {
+                        validPositions.push({ x, y });
+                    }
+                }
+            }
+            if (validPositions.length > 0) {
+                const randomPosition = validPositions[Math.floor(Math.random() * validPositions.length)];
+                exit.x = randomPosition.x;
+                exit.y = randomPosition.y;
+            }
+        }
+
+        function placeGhost() {
+            let validPositions = [];
+            for (let y = 0; y < maze.length; y++) {
+                for (let x = 0; x < maze[y].length; x++) {
+                    if (maze[y][x] === 0) {
+                        validPositions.push({ x, y });
+                    }
+                }
+            }
+            if (validPositions.length > 0) {
+                const randomPosition = validPositions[Math.floor(Math.random() * validPositions.length)];
+                ghost.x = randomPosition.x;
+                ghost.y = randomPosition.y;
+            }
+        }
+
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+                const minutes = Math.floor(elapsedTime / 60).toString().padStart(2, '0');
+                const seconds = (elapsedTime % 60).toString().padStart(2, '0');
+                timerElement.textContent = `${minutes}:${seconds}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        function startGame() {
+            maze = generateMaze(20, 20);
+            player.x = 1; player.y = 1;
+            placeExit();
+            placeGhost();
+            canvas.style.display = "block";
+            document.querySelector('.menu-container').style.display = "none"; // Skryje menu
+            document.querySelector('.game-controls').style.display = "block"; // Zobrazí tlačítko "Konec"
+            timerElement.style.display = "block"; // Zobrazí časovač
+            startTimer(); // Spustí časovač
+            gameInterval = setInterval(() => {
+                moveGhost();
+                drawMaze();
+            }, 300);
+            drawMaze();
+        }
+
+        function stopGame() {
+            clearInterval(gameInterval);
+            stopTimer(); // Zastaví časovač
+            canvas.style.display = "none";
+            document.querySelector('.menu-container').style.display = "flex"; // Zobrazí menu
+            document.querySelector('.game-controls').style.display = "none"; // Skryje tlačítko "Konec"
+            timerElement.style.display = "none"; // Skryje časovač
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowUp") movePlayer(0, -1);
+            if (e.key === "ArrowDown") movePlayer(0, 1);
+            if (e.key === "ArrowLeft") movePlayer(-1, 0);
+            if (e.key === "ArrowRight") movePlayer(1, 0);
+        });
+    </script>
+</body>
+</html>
